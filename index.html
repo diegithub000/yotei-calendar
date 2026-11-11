@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>予定カレンダー</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --canvas: #e6e8ec;
+        --surface: #fff;
+        --ink: #1c2430;
+        --muted: #8b93a0;
+        --line: #e6ebf2;
+        --slot: #2f7cf6;
+        --accent: #e23d3d;
+        --wash: #eef4ff;
+        font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--canvas); color: var(--ink); }
+      button { font: inherit; }
+      button:not(:disabled) { cursor: pointer; }
+      .app {
+        display: flex;
+        flex-direction: column;
+        width: min(100%, 28rem);
+        height: 100dvh;
+        margin: 0 auto;
+        background: var(--surface);
+        box-shadow: 0 24px 48px rgb(28 36 48 / 12%);
+      }
+      header { padding: 12px 8px 8px; }
+      .nav { display: flex; align-items: center; }
+      .nav h1 { flex: 1; margin: 0; text-align: center; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+      .icon, .today, .mode, .sheet button {
+        border: 0;
+        background: transparent;
+      }
+      .icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 999px;
+        font-size: 1.4rem;
+        color: var(--ink);
+      }
+      .center { display: flex; justify-content: center; }
+      .today {
+        margin-top: 2px;
+        border-radius: 999px;
+        background: var(--slot);
+        color: var(--surface);
+        font-weight: 700;
+        font-size: 0.9rem;
+        padding: 6px 20px;
+      }
+      .hint { margin: 8px 8px 0; text-align: center; color: var(--muted); font-size: 12px; font-weight: 600; }
+      .mode {
+        margin-top: 8px;
+        border-radius: 999px;
+        background: var(--slot);
+        color: var(--surface);
+        font-size: 12px;
+        font-weight: 700;
+        padding: 6px 16px;
+      }
+      .mode.stop { background: var(--wash); color: var(--slot); }
+      .notice { margin: 4px 0 0; text-align: center; color: var(--accent); font-size: 12px; font-weight: 700; }
+      .week, .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+      .week { border-bottom: 1px solid var(--line); }
+      .week span { padding: 4px 0; text-align: center; font-size: 12px; font-weight: 700; }
+      .sun { color: var(--accent); }
+      .sat { color: var(--slot); }
+      .grid { flex: 1; min-height: 0; border-left: 1px solid var(--line); }
+      .day {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-height: 0;
+        padding: 2px;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .day.today { background: var(--wash); }
+      .num {
+        width: 20px;
+        height: 20px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .num.on { background: var(--slot); color: var(--surface); }
+      .slot {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        border: 0;
+        border-radius: 4px;
+        padding: 0 2px;
+        color: var(--surface);
+        background: var(--slot);
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1.1;
+        touch-action: manipulation;
+        user-select: none;
+      }
+      .slot[data-marked="true"] { background: var(--accent); }
+      .slot[data-holding="true"]::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        height: 2px;
+        background: var(--surface);
+        transform-origin: left;
+        animation: hold 480ms linear forwards;
+      }
+      @keyframes hold { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+      .mask {
+        position: fixed;
+        inset: 0;
+        z-index: 5;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        background: rgb(28 36 48 / 40%);
+      }
+      .sheet {
+        width: min(100%, 28rem);
+        border-radius: 24px 24px 0 0;
+        background: var(--surface);
+        padding: 20px 20px 24px;
+      }
+      .sheet h2 { margin: 0; font-size: 1.15rem; }
+      .sheet p { margin: 6px 0 0; color: var(--muted); font-size: 0.9rem; font-weight: 600; }
+      .sheet label { display: block; margin-top: 14px; font-size: 0.9rem; font-weight: 700; }
+      .sheet input {
+        width: 100%;
+        margin-top: 8px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        font: inherit;
+        color: var(--ink);
+      }
+      .sheet .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 18px; }
+      .sheet button {
+        border-radius: 12px;
+        padding: 12px;
+        font-weight: 700;
+      }
+      .sheet .ghost { border: 1px solid var(--line); }
+      .sheet .go { background: var(--slot); color: var(--surface); }
+      .err { color: var(--accent); font-size: 12px; font-weight: 700; }
+      @media (min-width: 640px) {
+        .mask { align-items: center; }
+        .sheet { border-radius: 24px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <div class="nav">
+          <button class="icon" id="prev" type="button" aria-label="前の月">‹</button>
+          <h1 id="title"></h1>
+          <button class="icon" id="next" type="button" aria-label="次の月">›</button>
+        </div>
+        <div class="center"><button class="today" id="today" type="button">今日</button></div>
+        <p class="hint">見るのは誰でもできます。編集は、この GitHub を変更できる人だけです</p>
+        <div class="center"><button class="mode" id="mode" type="button">編集する</button></div>
+        <p class="notice" id="notice"></p>
+      </header>
+      <div class="week" id="week"></div>
+      <div class="grid" id="grid"></div>
+    </main>
+    <script>
+      const PERIODS = [
+        ["am", "午前"],
+        ["pm", "午後"],
+        ["night", "夜"],
+      ];
+      const WEEK = ["日", "月", "火", "水", "木", "金", "土"];
+      const TOKEN_KEY = "yotei-gh-token";
+      const HOLD_MS = 480;
+
+      const title = document.querySelector("#title");
+      const grid = document.querySelector("#grid");
+      const notice = document.querySelector("#notice");
+      const modeBtn = document.querySelector("#mode");
+      const week = document.querySelector("#week");
+      week.innerHTML = WEEK.map((label, index) => {
+        const tone = index === 0 ? "sun" : index === 6 ? "sat" : "";
+        return `<span class="${tone}">${label}</span>`;
+      }).join("");
+
+      let cursor = new Date();
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+      const today = new Date();
+      const todayIso = iso(today);
+      let data = {};
+      let unlocked = false;
+      let saving = Promise.resolve();
+
+      function iso(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, "0");
+        const d = String(date.getDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+
+      function daysOfMonth(month) {
+        const first = new Date(month.getFullYear(), month.getMonth(), 1);
+        const last = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+        const start = new Date(first);
+        start.setDate(first.getDate() - first.getDay());
+        const end = new Date(last);
+        end.setDate(last.getDate() + (6 - last.getDay()));
+        const days = [];
+        for (let day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
+          days.push(new Date(day));
+        }
+        return days;
+      }
+
+      function keyOf(day, period) {
+        return `${iso(day)}:${period}`;
+      }
+
+      function repoOf() {
+        const host = location.hostname;
+        if (!host.endsWith(".github.io")) return null;
+        const owner = host.slice(0, -".github.io".length);
+        const seg = location.pathname.split("/").filter(Boolean)[0];
+        if (!owner) return null;
+        if (!seg || seg.includes(".")) return { owner, repo: `${owner}.github.io` };
+        return { owner, repo: seg };
+      }
+
+      function setNotice(text) {
+        notice.textContent = text || "";
+      }
+
+      function paintMode() {
+        modeBtn.textContent = unlocked ? "編集を終える" : "編集する";
+        modeBtn.classList.toggle("stop", unlocked);
+      }
+
+      function render() {
+        title.textContent = `${cursor.getFullYear()}年 ${cursor.getMonth() + 1}月`;
+        const days = daysOfMonth(cursor);
+        grid.style.gridTemplateRows = `repeat(${days.length / 7}, minmax(0, 1fr))`;
+        grid.replaceChildren();
+        for (const day of days) {
+          const inMonth = day.getMonth() === cursor.getMonth();
+          const cell = document.createElement("div");
+          cell.className = `day${iso(day) === todayIso && inMonth ? " today" : ""}`;
+          const num = document.createElement("span");
+          num.className = "num";
+          if (iso(day) === todayIso) num.classList.add("on");
+          else if (!inMonth) num.style.color = "var(--muted)";
+          else if (day.getDay() === 0) num.classList.add("sun");
+          else if (day.getDay() === 6) num.classList.add("sat");
+          num.textContent = String(day.getDate());
+          cell.append(num);
+          if (inMonth) {
+            for (const [id, label] of PERIODS) {
+              const slot = data[keyOf(day, id)] || { marked: false, text: "" };
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "slot";
+              button.dataset.marked = slot.marked ? "true" : "false";
+              const text = (slot.text || "").trim();
+              button.textContent = text || label;
+              button.setAttribute("aria-label", `${day.getDate()}日 ${label}${slot.marked ? "、赤" : "、青"}`);
+              bindSlot(button, day, id, label);
+              cell.append(button);
+            }
+          }
+          grid.append(cell);
+        }
+      }
+
+      function bindSlot(button, day, period, fallback) {
+        let timer = 0;
+        let fired = false;
+        let startX = 0;
+        let startY = 0;
+        const clear = () => {
+          window.clearTimeout(timer);
+          button.dataset.holding = "false";
+        };
+        button.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          fired = false;
+          startX = event.clientX;
+          startY = event.clientY;
+          button.dataset.holding = "true";
+          button.setPointerCapture(event.pointerId);
+          timer = window.setTimeout(() => {
+            fired = true;
+            clear();
+            beginEdit(day, period, fallback);
+          }, HOLD_MS);
+        });
+        button.addEventListener("pointermove", (event) => {
+          if (!timer) return;
+          if (Math.hypot(event.clientX - startX, event.clientY - startY) > 10) clear();
+        });
+        button.addEventListener("pointerup", () => {
+          clear();
+          if (!fired) toggle(day, period);
+        });
+        button.addEventListener("pointercancel", clear);
+        button.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          fired = true;
+          clear();
+          beginEdit(day, period, fallback);
+        });
+      }
+
+      function requireEdit() {
+        openSheet(sheetToken());
+      }
+
+      function toggle(day, period) {
+        if (!unlocked) {
+          requireEdit();
+          return;
+        }
+        const key = keyOf(day, period);
+        const slot = data[key] || { marked: false, text: "" };
+        const next = { ...slot, marked: !slot.marked };
+        writeSlot(key, next);
+      }
+
+      function beginEdit(day, period, fallback) {
+        if (!unlocked) {
+          requireEdit();
+          return;
+        }
+        const key = keyOf(day, period);
+        const slot = data[key] || { marked: false, text: "" };
+        const weekday = WEEK[day.getDay()];
+        openSheet(sheetText(`${day.getMonth() + 1}月${day.getDate()}日（${weekday}）　${fallback}`, slot.text.trim() || fallback, (value) => {
+          const stored = value.trim() === fallback ? "" : value.trim().slice(0, 16);
+          writeSlot(key, { ...slot, text: stored });
+        }));
+      }
+
+      function writeSlot(key, slot) {
+        const text = (slot.text || "").trim().slice(0, 16);
+        if (!slot.marked && !text) delete data[key];
+        else data[key] = { marked: Boolean(slot.marked), text };
+        render();
+        enqueueSave();
+      }
+
+      function enqueueSave() {
+        const snapshot = JSON.parse(JSON.stringify(data));
+        saving = saving
+          .catch(() => undefined)
+          .then(() => save(snapshot))
+          .catch((error) => {
+            setNotice(error.message || "保存できませんでした");
+          });
+      }
+
+      async function save(snapshot) {
+        const repo = repoOf();
+        const token = localStorage.getItem(TOKEN_KEY) || "";
+        if (!repo) throw new Error("GitHub Pages のアドレスで開いてから編集してください");
+        if (!token) throw new Error("編集トークンがありません");
+        const api = `https://api.github.com/repos/${repo.owner}/${repo.repo}/contents/calendar.json`;
+        const headers = {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+        };
+        const current = await fetch(api, { headers });
+        let sha;
+        if (current.ok) sha = (await current.json()).sha;
+        else if (current.status !== 404) throw new Error(current.status === 401 ? "トークンが違います" : "保存できませんでした");
+        const content = btoa(unescape(encodeURIComponent(`${JSON.stringify(snapshot, null, 2)}\n`)));
+        const put = await fetch(api, {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ message: "予定を更新", content, sha }),
+        });
+        if (put.status === 401) {
+          localStorage.removeItem(TOKEN_KEY);
+          unlocked = false;
+          paintMode();
+          throw new Error("トークンが違います");
+        }
+        if (!put.ok) throw new Error("保存できませんでした");
+        setNotice("");
+      }
+
+      async function load() {
+        const response = await fetch(`calendar.json?t=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) throw new Error("予定を読み込めませんでした");
+        const next = await response.json();
+        if (!next || typeof next !== "object" || Array.isArray(next)) return;
+        data = next;
+        render();
+      }
+
+      function openSheet(node) {
+        const mask = document.createElement("div");
+        mask.className = "mask";
+        mask.append(node);
+        document.body.append(mask);
+        return mask;
+      }
+
+      function sheetToken() {
+        const form = document.createElement("form");
+        form.className = "sheet";
+        form.innerHTML = `
+          <h2>編集トークン</h2>
+          <p>GitHub で作ったトークンを貼ります。このブラウザにだけ保存され、ページには残りません。</p>
+          <label for="token">トークン</label>
+          <input id="token" type="password" autocomplete="off" />
+          <p class="err" data-err></p>
+          <div class="row">
+            <button class="ghost" type="button" data-close>キャンセル</button>
+            <button class="go" type="submit">編集を始める</button>
+          </div>`;
+        const input = form.querySelector("#token");
+        input.value = localStorage.getItem(TOKEN_KEY) || "";
+        form.querySelector("[data-close]").addEventListener("click", () => form.parentElement.remove());
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const token = input.value.trim();
+          const err = form.querySelector("[data-err]");
+          if (token.length < 8) {
+            err.textContent = "トークンを貼ってください";
+            return;
+          }
+          const repo = repoOf();
+          if (!repo) {
+            err.textContent = "GitHub Pages のアドレスで開いてください";
+            return;
+          }
+          const check = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.repo}`, {
+            headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}` },
+          });
+          if (!check.ok) {
+            err.textContent = "トークンが違うか、リポジトリを読めません";
+            return;
+          }
+          localStorage.setItem(TOKEN_KEY, token);
+          unlocked = true;
+          paintMode();
+          form.parentElement.remove();
+          setNotice("");
+        });
+        return form;
+      }
+
+      function sheetText(label, initial, onSave) {
+        const form = document.createElement("form");
+        form.className = "sheet";
+        form.innerHTML = `
+          <h2>文字を編集</h2>
+          <p></p>
+          <label for="label">ボタンの文字</label>
+          <input id="label" maxlength="16" autocomplete="off" />
+          <p>空欄にすると元の「午前・午後・夜」に戻ります</p>
+          <div class="row">
+            <button class="ghost" type="button" data-close>キャンセル</button>
+            <button class="go" type="submit">保存</button>
+          </div>`;
+        form.querySelector("p").textContent = label;
+        const input = form.querySelector("#label");
+        input.value = initial;
+        form.querySelector("[data-close]").addEventListener("click", () => form.parentElement.remove());
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          onSave(input.value);
+          form.parentElement.remove();
+        });
+        window.setTimeout(() => input.select(), 30);
+        return form;
+      }
+
+      document.querySelector("#prev").addEventListener("click", () => {
+        cursor = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1);
+        render();
+      });
+      document.querySelector("#next").addEventListener("click", () => {
+        cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+        render();
+      });
+      document.querySelector("#today").addEventListener("click", () => {
+        cursor = new Date(today.getFullYear(), today.getMonth(), 1);
+        render();
+      });
+      modeBtn.addEventListener("click", () => {
+        if (unlocked) {
+          unlocked = false;
+          paintMode();
+          return;
+        }
+        requireEdit();
+      });
+
+      paintMode();
+      render();
+      load().catch(() => setNotice("予定を読み込めませんでした"));
+      window.setInterval(() => {
+        if (unlocked) return;
+        load().catch(() => undefined);
+      }, 20000);
+    </script>
+  </body>
+</html>
