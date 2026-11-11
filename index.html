@@ -365,14 +365,23 @@
         enqueueSave();
       }
 
+      let saveTimer = 0;
+
       function enqueueSave() {
-        const snapshot = JSON.parse(JSON.stringify(data));
-        saving = saving
-          .catch(() => undefined)
-          .then(() => save(snapshot))
-          .catch((error) => {
-            setNotice(error.message || "保存できませんでした");
-          });
+        window.clearTimeout(saveTimer);
+        saveTimer = window.setTimeout(() => {
+          const snapshot = JSON.parse(JSON.stringify(data));
+          saving = saving
+            .catch(() => undefined)
+            .then(() => save(snapshot))
+            .catch((error) => {
+              setNotice(error.message || "保存できませんでした");
+            });
+        }, 700);
+      }
+
+      function wait(ms) {
+        return new Promise((resolve) => window.setTimeout(resolve, ms));
       }
 
       async function save(snapshot) {
@@ -385,24 +394,39 @@
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${token}`,
         };
-        const current = await fetch(api, { headers });
-        let sha;
-        if (current.ok) sha = (await current.json()).sha;
-        else if (current.status !== 404) throw new Error(current.status === 401 ? "トークンが違います" : "保存できませんでした");
         const content = btoa(unescape(encodeURIComponent(`${JSON.stringify(snapshot, null, 2)}\n`)));
-        const put = await fetch(api, {
-          method: "PUT",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ message: "予定を更新", content, sha }),
-        });
-        if (put.status === 401) {
-          localStorage.removeItem(TOKEN_KEY);
-          unlocked = false;
-          paintMode();
-          throw new Error("トークンが違います");
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const current = await fetch(api, { headers, cache: "no-store" });
+          if (current.status === 401) throw new Error("トークンが違います");
+          if (current.status === 429 || current.status === 403) {
+            await wait(900 * (attempt + 1));
+            continue;
+          }
+          let sha;
+          if (current.ok) sha = (await current.json()).sha;
+          else if (current.status !== 404) throw new Error("保存できませんでした");
+          const put = await fetch(api, {
+            method: "PUT",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ message: "予定を更新", content, sha }),
+          });
+          if (put.ok) {
+            setNotice("");
+            return;
+          }
+          if (put.status === 401) {
+            localStorage.removeItem(TOKEN_KEY);
+            unlocked = false;
+            paintMode();
+            throw new Error("トークンが違います");
+          }
+          if (put.status === 409 || put.status === 429 || put.status === 403) {
+            await wait(900 * (attempt + 1));
+            continue;
+          }
+          throw new Error("保存できませんでした");
         }
-        if (!put.ok) throw new Error("保存できませんでした");
-        setNotice("");
+        throw new Error("GitHub が混んでいるので、少し待ってからもう一度タップしてください");
       }
 
       async function load() {
